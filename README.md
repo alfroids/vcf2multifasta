@@ -2,7 +2,9 @@
 Create a FASTA file with multiple sequences from a VCF file and the reference genome to which all genomes in the VCF file were originally aligned.
 ## How to use
 This script requires `PyVCF`, `pysam`, `biopython` and `pandas`, which can be installed via `pip`:
-```pip install pandas biopython pysam PyVCF```
+```
+pip install pandas biopython pysam PyVCF
+```
 > `pysam` is only available for UNIX systems
 ### Arguments
 ```
