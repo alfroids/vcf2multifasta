@@ -40,21 +40,31 @@ def initialize_parser() -> argparse.ArgumentParser:
         nargs="?",
         default=-1,
     )
-    # p.add_argument(
-    #     "--des",
-    #     help="Default description for all FASTA entries.",
-    #     required=False,
-    #     type=str,
-    #     nargs="+",
-    #     default="",
-    # )
+    p.add_argument(
+        "--des",
+        help="Default description for all mulsti FASTA entries.",
+        required=False,
+        type=str,
+        nargs="+",
+        default="",
+    )
     p.add_argument(
         "--out",
-        help="Path to the output FASTA file.",
+        help="Path to the output multi FASTA file.",
         required=False,
         type=str,
         nargs="?",
         default="",
+    )
+    p.add_argument(
+        "--gaps",
+        "-g",
+        help="Insert naive gaps on the output sequences.",
+        required=False,
+        action="store_true",
+    )
+    p.add_argument(
+        "--verbose", "-v", help="Verbose mode.", required=False, action="store_true"
     )
     return p
 
@@ -64,6 +74,9 @@ args = parser.parse_args()
 
 
 # Read VCF and create SNPs DataFrame ##########################################
+if args.verbose:
+    print("Reading and filtering VCF file.")
+
 vcf_reader = vcf.Reader(open(args.vcf, "rb"))
 
 
@@ -75,6 +88,8 @@ else:
 cols = ["POS"] + vcf_reader.samples
 snps = {c: [] for c in cols}
 
+if args.verbose:
+    print("Creating and processing SNPs DataFrame.")
 
 for record in vcf_reader:
     snps["POS"].append(record.POS)
@@ -83,13 +98,33 @@ for record in vcf_reader:
     for sample in record.samples:
         if sample.gt_bases is None:
             snps[sample.sample].append(record.REF)
+        elif args.gaps and sample.gt_bases == "*":
+            snps[sample.sample].append("")
         else:
             snps[sample.sample].append(sample.gt_bases)
 
 SNP = pd.DataFrame(snps)
 
+if args.gaps:
+    for i in SNP.index:
+        M = max(
+            [len(s) for s in SNP.loc[i, SNP.columns != "POS"].values.flatten().tolist()]
+        )
+        m = min(
+            [len(s) for s in SNP.loc[i, SNP.columns != "POS"].values.flatten().tolist()]
+        )
+
+        if M != m:
+            for column in SNP:
+                if column != "POS":
+                    if len(SNP.at[i, column]) < M:
+                        SNP.at[i, column] += (M - len(SNP.at[i, column])) * "-"
+
 
 # Read reference FASTA and extract the sequence at the specified range ########
+if args.verbose:
+    print("Reading FASTA file and extracting sequence.")
+
 fasta_dict = SeqIO.index(args.ref, "fasta")
 chrom = fasta_dict[args.chr]
 locus = chrom[args.start : args.end + 1]
@@ -97,20 +132,25 @@ seq = str(locus.seq)
 
 
 # Substitute SNPs into reference sequence and output multi-FASTA file #########
+if args.verbose:
+    print("Computing sequences and outputing to FASTA file.")
+
 if args.out != "":
     filepath = args.out
-    if not filepath.endswith(".fa"):
-        filepath += ".fa"
+    if not filepath.endswith(".fasta"):
+        filepath += ".fasta"
 else:
     filepath = args.vcf
     if filepath.endswith(".vcf"):
-        filepath = filepath[:-4] + ".fa"
+        filepath = filepath[:-4] + ".fasta"
     elif filepath.endswith(".vcf.gz"):
-        filepath = filepath[:-7] + ".fa"
+        filepath = filepath[:-7] + ".fasta"
     else:
         print("Error: unexpected VCF file extension.")
         exit(1)
 
+count = 0
+desc = " ".join(args.des).strip('"')
 with open(filepath, "w") as output:
     for column in SNP:
         if column == "POS":
@@ -132,6 +172,10 @@ with open(filepath, "w") as output:
                     snp_count += 1
                 seq_count += 1
 
-            strain = SeqRecord(Seq(strain_seq), id=column, description="")
+            strain = SeqRecord(Seq(strain_seq), id=column, description=desc)
             output.write(strain.format("fasta"))
             output.write("\n")
+            count += 1
+
+if args.verbose:
+    print("Successfully generated FASTA file with {} entries.".format(count))
